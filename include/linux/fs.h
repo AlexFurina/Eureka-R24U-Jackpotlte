@@ -1998,6 +1998,7 @@ struct super_operations {
 #define I_WILL_FREE		(1 << 4)
 #define I_FREEING		(1 << 5)
 #define I_CLEAR			(1 << 6)
+#define I_DIRTY_TIME_EXPIRED    (1 << 12)
 #define __I_SYNC		7
 #define I_SYNC			(1 << __I_SYNC)
 #define I_REFERENCED		(1 << 8)

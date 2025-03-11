@@ -97,7 +97,8 @@ static void ext4_finish_bio(struct bio *bio)
 		 * We check all buffers in the page under BH_Uptodate_Lock
 		 * to avoid races with other end io clearing async_write flags
 		 */
-		flags = bh_uptodate_lock_irqsave(head);
+		local_irq_save(flags);
+		bit_spin_lock(BH_Uptodate_Lock, &head->b_state);
 		do {
 			if (bh_offset(bh) < bio_start ||
 			    bh_offset(bh) + bh->b_size > bio_end) {
@@ -109,7 +110,8 @@ static void ext4_finish_bio(struct bio *bio)
 			if (bio->bi_error)
 				buffer_io_error(bh);
 		} while ((bh = bh->b_this_page) != head);
-		bh_uptodate_unlock_irqrestore(head, flags);
+		bit_spin_unlock(BH_Uptodate_Lock, &head->b_state);
+		local_irq_restore(flags);
 		if (!under_io) {
 #ifdef CONFIG_EXT4_FS_ENCRYPTION
 			if (ctx)
@@ -481,13 +483,9 @@ int ext4_bio_write_page(struct ext4_io_submit *io,
 	} while ((bh = bh->b_this_page) != head);
 
 	bh = head = page_buffers(page);
-#ifdef CONFIG_EXT4_PRIVATE_ENCRYPTION
-	if (ext4_encrypted_inode(inode) && S_ISREG(inode->i_mode) &&
-	    nr_to_submit && !inode->i_mapping->private_enc_mode) {
-#else
+
 	if (ext4_encrypted_inode(inode) && S_ISREG(inode->i_mode) &&
 	    nr_to_submit) {
-#endif /* CONFIG_EXT4_PRIVATE_ENCRYPTION */
 		gfp_t gfp_flags = GFP_NOFS;
 
 	retry_encrypt:
