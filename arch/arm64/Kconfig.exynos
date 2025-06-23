@@ -51,6 +51,10 @@ config MACH_EXYNOS7885_JACKPOTLTE_GLOBAL
 	bool "Build Dtbo image for A8 2018"
 	depends on SOC_EXYNOS7885
 
+config MACH_EXYNOS7885_JACKPOTLTE_JNP
+        bool "Build Dtbo image for Feel 2"
+        depends on SOC_EXYNOS7885
+
 config USE_STOCK_CONFIG_FOR_IKCONFIG
 	bool "Use stock config for /proc/config.gz"
 	depends on IKCONFIG

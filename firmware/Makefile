@@ -40,6 +40,7 @@ fw-shipped-$(CONFIG_SENSORS_TC3XXK_A10E_KOR) += coreriver/tc305k_a10e_kor.fw
 fw-shipped-$(CONFIG_SENSORS_A96T3X6_A40) += abov/a96t346_a405f.fw abov/a96t346_a405s.fw
 fw-shipped-$(CONFIG_SENSORS_A96T3X6_A30) += abov/a96t346_a305j.fw
 fw-shipped-$(CONFIG_SENSORS_A96T3X6_A30S) += abov/a96t356_a30s.fw
+fw-shipped-$(CONFIG_SENSORS_A96T3X6) += abov/a96t326_jackpotvelte.fw
 
 fw-shipped-$(CONFIG_FIVE_TEE_DRIVER) += five/ffffffff000000000000000000000072.tlbin
 
