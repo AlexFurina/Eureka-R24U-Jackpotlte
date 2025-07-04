@@ -1651,7 +1651,7 @@ static void lcd_init_svc(struct lcd_info *lcd)
 
 	buf = kzalloc(PATH_MAX, GFP_KERNEL);
 	if (buf) {
-		path = kernfs_path(svc_kobj->sd, buf, PATH_MAX);
+		int path = kernfs_path(svc_kobj->sd, buf, PATH_MAX);
 		dev_info(&lcd->ld->dev, "%s: %s %s\n", __func__, buf, !kn ? "create" : "");
 		kfree(buf);
 	}
