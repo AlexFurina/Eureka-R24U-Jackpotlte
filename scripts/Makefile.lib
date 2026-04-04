@@ -290,9 +290,6 @@ ifeq ($(KBUILD_ENABLE_EXTRA_GCC_CHECKS),)
 DTC_FLAGS += -Wno-unit_address_vs_reg
 endif
 
-# Disable noisy warnings when making dtbo by default
-DTC_FLAGS += -Wno-avoid_default_addr_size -Wno-reg_format
-
 # Generate an assembly file to wrap the output of the device tree compiler
 quiet_cmd_dt_S_dtb= DTB     $@
 cmd_dt_S_dtb=						\
@@ -327,10 +324,16 @@ $(obj)/%.dtbo: $(src)/%.dts FORCE
 
 dtc-tmp = $(subst $(comma),_,$(dot-target).dts.tmp)
 
-# mkdtimg - Tool to compile dtbos into dtbo image
-#----------------------------------------------------------------------------
-quiet_cmd_mkdtimg = IMG     $@
-cmd_mkdtimg = python3 $(srctree)/scripts/dtc/libfdt/mkdtboimg.py create $@ --page_size=2048 --custom0=0xff000000 $(filter-out FORCE,$^)
+# dtbtool (Exynos)
+# ---------------------------------------------------------------------------
+
+quiet_cmd_dtbtool_exynos = DTBTOOL $@
+cmd_dtbtool_exynos = $(objtree)/scripts/dtbtool_exynos/dtbtool \
+		--pagesize $(CONFIG_EXYNOS_DTBH_PAGE_SIZE) \
+		--platform $(CONFIG_EXYNOS_DTBH_PLATFORM_CODE) \
+		--subtype $(CONFIG_EXYNOS_DTBH_SUBTYPE_CODE) \
+		--model $(CONFIG_EXYNOS_DTBH_MODEL) \
+		-o $@ $(sort $(filter-out FORCE,$^))
 
 # cat
 # ---------------------------------------------------------------------------

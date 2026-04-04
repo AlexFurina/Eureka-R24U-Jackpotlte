@@ -136,6 +136,7 @@ int fuse_do_open(struct fuse_conn *fc, u64 nodeid, struct file *file,
 			ff->fh = outarg.fh;
 			ff->open_flags = outarg.open_flags;
 
+			fuse_passthrough_setup(fc, ff, &outarg);
 		} else if (err != -ENOSYS || isdir) {
 			fuse_file_free(ff);
 			return err;
@@ -255,6 +256,8 @@ void fuse_release_common(struct file *file, int opcode)
 {
 	struct fuse_file *ff = file->private_data;
 	struct fuse_req *req = ff->reserved_req;
+
+	fuse_passthrough_release(&ff->passthrough);
 
 	fuse_prepare_release(ff, file->f_flags, opcode);
 
@@ -428,6 +431,15 @@ static int fuse_flush(struct file *file, fl_owner_t id)
 
 	if (fc->no_flush)
 		return 0;
+
+	if (test_bit(AS_ENOSPC, &file->f_mapping->flags) &&
+	    test_and_clear_bit(AS_ENOSPC, &file->f_mapping->flags))
+		err = -ENOSPC;
+	if (test_bit(AS_EIO, &file->f_mapping->flags) &&
+	    test_and_clear_bit(AS_EIO, &file->f_mapping->flags))
+		err = -EIO;
+	if (err)
+		return err;
 
 	req = fuse_get_req_nofail_nopages(fc, file);
 	memset(&inarg, 0, sizeof(inarg));
@@ -933,6 +945,7 @@ static ssize_t fuse_file_read_iter(struct kiocb *iocb, struct iov_iter *to)
 {
 	struct inode *inode = iocb->ki_filp->f_mapping->host;
 	struct fuse_conn *fc = get_fuse_conn(inode);
+	struct fuse_file *ff = iocb->ki_filp->private_data;
 
 	/*
 	 * In auto invalidate mode, always update attributes on read.
@@ -947,6 +960,8 @@ static ssize_t fuse_file_read_iter(struct kiocb *iocb, struct iov_iter *to)
 			return err;
 	}
 
+	if (ff->passthrough.filp)
+		return fuse_passthrough_read_iter(iocb, to);
 	return generic_file_read_iter(iocb, to);
 }
 
@@ -1185,6 +1200,10 @@ static ssize_t fuse_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 	struct inode *inode = mapping->host;
 	ssize_t err;
 	loff_t endbyte = 0;
+	struct fuse_file *ff = file->private_data;
+
+	if (ff->passthrough.filp)
+		return fuse_passthrough_write_iter(iocb, from);
 
 	if (get_fuse_conn(inode)->writeback_cache) {
 		/* Update size (EOF optimization) and mode (SUID clearing) */
@@ -2090,6 +2109,11 @@ static const struct vm_operations_struct fuse_file_vm_ops = {
 
 static int fuse_file_mmap(struct file *file, struct vm_area_struct *vma)
 {
+	struct fuse_file *ff = file->private_data;
+
+	if (ff->passthrough.filp)
+		return fuse_passthrough_mmap(file, vma);
+
 	if ((vma->vm_flags & VM_SHARED) && (vma->vm_flags & VM_MAYWRITE))
 		fuse_link_write_file(file);
 
@@ -2279,20 +2303,77 @@ static sector_t fuse_bmap(struct address_space *mapping, sector_t block)
 	return err ? 0 : outarg.block;
 }
 
+static loff_t fuse_lseek(struct file *file, loff_t offset, int whence)
+{
+	struct inode *inode = file->f_mapping->host;
+	struct fuse_conn *fc = get_fuse_conn(inode);
+	struct fuse_file *ff = file->private_data;
+	FUSE_ARGS(args);
+	struct fuse_lseek_in inarg = {
+		.fh = ff->fh,
+		.offset = offset,
+		.whence = whence
+	};
+	struct fuse_lseek_out outarg;
+	int err;
+
+	if (fc->no_lseek)
+		goto fallback;
+
+	args.in.h.opcode = FUSE_LSEEK;
+	args.in.h.nodeid = ff->nodeid;
+	args.in.numargs = 1;
+	args.in.args[0].size = sizeof(inarg);
+	args.in.args[0].value = &inarg;
+	args.out.numargs = 1;
+	args.out.args[0].size = sizeof(outarg);
+	args.out.args[0].value = &outarg;
+	err = fuse_simple_request(fc, &args);
+	if (err) {
+		if (err == -ENOSYS) {
+			fc->no_lseek = 1;
+			goto fallback;
+		}
+		return err;
+	}
+
+	return vfs_setpos(file, outarg.offset, inode->i_sb->s_maxbytes);
+
+fallback:
+	err = fuse_update_attributes(inode, NULL, file, NULL);
+	if (!err)
+		return generic_file_llseek(file, offset, whence);
+	else
+		return err;
+}
+
 static loff_t fuse_file_llseek(struct file *file, loff_t offset, int whence)
 {
 	loff_t retval;
 	struct inode *inode = file_inode(file);
 
-	/* No i_mutex protection necessary for SEEK_CUR and SEEK_SET */
-	if (whence == SEEK_CUR || whence == SEEK_SET)
-		return generic_file_llseek(file, offset, whence);
-
-	mutex_lock(&inode->i_mutex);
-	retval = fuse_update_attributes(inode, NULL, file, NULL);
-	if (!retval)
+	switch (whence) {
+	case SEEK_SET:
+	case SEEK_CUR:
+		 /* No i_mutex protection necessary for SEEK_CUR and SEEK_SET */
 		retval = generic_file_llseek(file, offset, whence);
-	mutex_unlock(&inode->i_mutex);
+		break;
+	case SEEK_END:
+		mutex_lock(&inode->i_mutex);
+		retval = fuse_update_attributes(inode, NULL, file, NULL);
+		if (!retval)
+			retval = generic_file_llseek(file, offset, whence);
+		mutex_unlock(&inode->i_mutex);
+		break;
+	case SEEK_HOLE:
+	case SEEK_DATA:
+		mutex_lock(&inode->i_mutex);
+		retval = fuse_lseek(file, offset, whence);
+		mutex_unlock(&inode->i_mutex);
+		break;
+	default:
+		retval = -EINVAL;
+	}
 
 	return retval;
 }
@@ -2822,7 +2903,7 @@ static void fuse_do_truncate(struct file *file)
 	attr.ia_file = file;
 	attr.ia_valid |= ATTR_FILE;
 
-	fuse_do_setattr(inode, &attr, file);
+	fuse_do_setattr(file_dentry(file), &attr, file);
 }
 
 static inline loff_t fuse_round_up(loff_t off)

@@ -705,6 +705,10 @@ static int snd_soc_dapm_set_bias_level(struct snd_soc_dapm_context *dapm,
 out:
 	trace_snd_soc_bias_level_done(card, level);
 
+	/* success */
+	if (ret == 0)
+		snd_soc_dapm_init_bias_level(dapm, level);
+
 	return ret;
 }
 
@@ -1520,9 +1524,6 @@ static void dapm_seq_run(struct snd_soc_card *card,
 
 	list_for_each_entry_safe(w, n, list, power_list) {
 		ret = 0;
-
-		dev_info(w->dapm->dev, "dapm powering %s widget %s\n",
-				power_up ? "up" : "down", w->name);
 
 		/* Do we need to apply any queued changes? */
 		if (sort[w->id] != cur_sort || w->reg != cur_reg ||

@@ -531,6 +531,8 @@ int rcu_read_lock_bh_held(void);
  */
 int rcu_read_lock_sched_held(void);
 
+int rcu_read_lock_any_held(void);
+
 #else /* #ifdef CONFIG_DEBUG_LOCK_ALLOC */
 
 # define rcu_lock_acquire(a)		do { } while (0)
@@ -544,6 +546,11 @@ static inline int rcu_read_lock_held(void)
 static inline int rcu_read_lock_bh_held(void)
 {
 	return 1;
+}
+
+static inline int rcu_read_lock_any_held(void)
+{
+	return !preemptible();
 }
 
 static inline int rcu_read_lock_sched_held(void)
@@ -759,7 +766,7 @@ static inline void rcu_preempt_sleep_check(void)
  * The tracing version of rcu_dereference_raw() must not call
  * rcu_read_lock_held().
  */
-#define rcu_dereference_raw_notrace(p) __rcu_dereference_check((p), 1, __rcu)
+#define rcu_dereference_raw_check(p) __rcu_dereference_check((p), 1, __rcu)
 
 /**
  * rcu_dereference_protected() - fetch RCU pointer when updates prevented

@@ -1300,6 +1300,7 @@ static int wacom_initialize_remote(struct wacom *wacom)
 	if (error) {
 		hid_err(wacom->hdev,
 			"cannot create sysfs group err: %d\n", error);
+		kobject_put(wacom->remote_dir);
 		return error;
 	}
 
@@ -1661,7 +1662,7 @@ static void wacom_update_name(struct wacom *wacom)
 		    strstr(wacom->hdev->name, "wacom") ||
 		    strstr(wacom->hdev->name, "WACOM")) {
 			/* name is in HID descriptor, use it */
-			strlcpy(name, wacom->hdev->name, sizeof(name));
+			strscpy(name, wacom->hdev->name, sizeof(name));
 
 			/* strip out excess whitespaces */
 			while (1) {
@@ -1680,7 +1681,7 @@ static void wacom_update_name(struct wacom *wacom)
 				 "%s %X", features->name, wacom->hdev->product);
 		}
 	} else {
-		strlcpy(name, features->name, sizeof(name));
+		strscpy(name, features->name, sizeof(name));
 	}
 
 	/* Append the device type to the name */

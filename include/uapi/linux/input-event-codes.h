@@ -733,6 +733,7 @@
 #define ABS_TOOL_WIDTH		0x1c
 
 #define ABS_VOLUME		0x20
+#define ABS_PROFILE		0x21
 
 #define ABS_MISC		0x28
 
@@ -791,6 +792,7 @@
 #define SW_LINEIN_INSERT	0x0d  /* set = inserted */
 #define SW_MUTE_DEVICE		0x0e  /* set = device disabled */
 #define SW_GLOVE		0x0f	/* set = glove mode */
+#define SW_MACHINE_COVER	0x10  /* set = cover closed */
 #define SW_PEN_INSERT		0x13  /* set = pen insert, remove */
 #define SW_FLIP                 0x15    /* set = flip cover */
 #define SW_CERTIFYHALL          0x1b    /* set = certify_hall... */

@@ -549,6 +549,10 @@ bytes respectively. Such letter suffixes can also be entirely omitted.
 			embedded devices based on command line input.
 			See Documentation/block/cmdline-partition.txt
 
+	boot_cpus=	[SMP]
+			Rather than attempting to online all possible CPUs at
+			boot time, only online the specified set of CPUs.
+
 	boot_delay=	Milliseconds to delay each printk during boot.
 			Values larger than 10 seconds (10000) are changed to
 			no delay (0).
@@ -599,6 +603,15 @@ bytes respectively. Such letter suffixes can also be entirely omitted.
 			{Currently only "memory" controller deal with this and
 			cut the overhead, others just disable the usage. So
 			only cgroup_disable=memory is actually worthy}
+
+	cgroup_no_v1=	[KNL] Disable cgroup controllers and named hierarchies in v1
+			Format: { { controller | "all" | "named" }
+			          [,{ controller | "all" | "named" }...] }
+			Like cgroup_disable, but only applies to cgroup v1;
+			the blacklisted controllers remain available in cgroup2.
+			"all" blacklists all controllers and "named" disables
+			named mounts. Specifying both "all" and "named" disables
+			all v1 hierarchies.
 
 	checkreqprot	[SELINUX] Set initial checkreqprot flag value.
 			Format: { "0" | "1" }
@@ -745,6 +758,12 @@ bytes respectively. Such letter suffixes can also be entirely omitted.
 	consoleblank=	[KNL] The console blank (screen saver) timeout in
 			seconds. Defaults to 10*60 = 10mins. A value of 0
 			disables the blank timer.
+
+	core_ctl_disable_cpumask= [SMP]
+			Exempt the CPUs from being managed by core_ctl.
+			core_ctl operates on a cluster basis. So all the
+			CPUs in a given cluster must be specified to disable
+			core_ctl for that cluster.
 
 	coredump_filter=
 			[KNL] Change the default value for
@@ -938,7 +957,7 @@ bytes respectively. Such letter suffixes can also be entirely omitted.
 			The filter can be disabled or changed to another
 			driver later using sysfs.
 
-	drm_kms_helper.edid_firmware=[<connector>:]<file>[,[<connector>:]<file>]
+	drm.edid_firmware=[<connector>:]<file>[,[<connector>:]<file>]
 			Broken monitors, graphic adapters, KVMs and EDIDless
 			panels may send no or incorrect EDID data sets.
 			This parameter allows to specify an EDID data sets
@@ -1676,15 +1695,6 @@ bytes respectively. Such letter suffixes can also be entirely omitted.
 	ip=		[IP_PNP]
 			See Documentation/filesystems/nfs/nfsroot.txt.
 
-	irqaffinity=	[SMP] Set the default irq affinity mask
-			Format:
-			<cpu number>,...,<cpu number>
-			or
-			<cpu number>-<cpu number>
-			(must be a positive range in ascending order)
-			or a mixture
-			<cpu number>,...,<cpu number>-<cpu number>
-
 	irqfixup	[HW]
 			When an interrupt is not handled search all handlers
 			for it. Intended to get systems with badly broken
@@ -2190,12 +2200,6 @@ bytes respectively. Such letter suffixes can also be entirely omitted.
 			fills the memory with this pattern, validates
 			memory contents and reserves bad memory
 			regions that are detected.
-
-	mem_sleep_default=	[SUSPEND] Default system suspend mode:
-			s2idle  - Suspend-To-Idle
-			shallow - Power-On Suspend or equivalent (if supported)
-			deep    - Suspend-To-RAM or equivalent (if supported)
-			See Documentation/power/states.txt.
 
 	meye.*=		[HW] Set MotionEye Camera parameters
 			See Documentation/video4linux/meye.txt.
@@ -2825,6 +2829,11 @@ bytes respectively. Such letter suffixes can also be entirely omitted.
 			each page is disabled in default. With this switch,
 			we can turn it on.
 			on: enable the feature
+
+	page_poison=	[KNL] Boot-time parameter changing the state of
+			poisoning on the buddy allocator.
+			off: turn off poisoning
+			on: turn on poisoning
 
 	panic=		[KNL] Kernel behaviour on panic: delay <timeout>
 			timeout > 0: seconds before rebooting
@@ -3472,35 +3481,18 @@ bytes respectively. Such letter suffixes can also be entirely omitted.
 	rcutorture.verbose= [KNL]
 			Enable additional printk() statements.
 
-	rcupdate.rcu_cpu_stall_suppress= [KNL]
-			Suppress RCU CPU stall warning messages.
-
-	rcupdate.rcu_cpu_stall_timeout= [KNL]
-			Set timeout for RCU CPU stall warning messages.
-
 	rcupdate.rcu_expedited= [KNL]
 			Use expedited grace-period primitives, for
 			example, synchronize_rcu_expedited() instead
 			of synchronize_rcu().  This reduces latency,
 			but can increase CPU utilization, degrade
 			real-time latency, and degrade energy efficiency.
-			No effect on CONFIG_TINY_RCU kernels.
 
-	rcupdate.rcu_normal= [KNL]
-			Use only normal grace-period primitives,
-			for example, synchronize_rcu() instead of
-			synchronize_rcu_expedited().  This improves
-			real-time latency, CPU utilization, and
-			energy efficiency, but can expose users to
-			increased grace-period latency.  This parameter
-			overrides rcupdate.rcu_expedited.  No effect on
-			CONFIG_TINY_RCU kernels.
+	rcupdate.rcu_cpu_stall_suppress= [KNL]
+			Suppress RCU CPU stall warning messages.
 
-	rcupdate.rcu_normal_after_boot= [KNL]
-			Once boot has completed (that is, after
-			rcu_end_inkernel_boot() has been invoked), use
-			only normal grace-period primitives.  No effect
-			on CONFIG_TINY_RCU kernels.
+	rcupdate.rcu_cpu_stall_timeout= [KNL]
+			Set timeout for RCU CPU stall warning messages.
 
 	rcupdate.rcu_task_stall_timeout= [KNL]
 			Set timeout in jiffies for RCU task stall warning
@@ -3544,6 +3536,13 @@ bytes respectively. Such letter suffixes can also be entirely omitted.
 			[KNL, SMP] Set scheduler's default relax_domain_level.
 			See Documentation/cgroups/cpusets.txt.
 
+	relative_sleep_states=
+			[SUSPEND] Use sleep state labeling where the deepest
+			state available other than hibernation is always "mem".
+			Format: { "0" | "1" }
+			0 -- Traditional sleep state labels.
+			1 -- Relative sleep state labels.
+
 	reserve=	[KNL,BUGS] Force the kernel to ignore some iomem area
 
 	reservetop=	[X86-32]
@@ -3582,9 +3581,6 @@ bytes respectively. Such letter suffixes can also be entirely omitted.
 				present during boot.
 		nocompress	Don't compress/decompress hibernation images.
 		no		Disable hibernation and resume.
-		protect_image	Turn on image protection during restoration
-				(that will set all pages holding image data
-				during restoration read-only).
 
 	retain_initrd	[RAM] Keep initrd memory after extraction
 
@@ -3791,12 +3787,8 @@ bytes respectively. Such letter suffixes can also be entirely omitted.
 			Specific mitigations can also be selected manually:
 
 			retpoline	  - replace indirect branches
-			retpoline,generic - Retpolines
-			retpoline,lfence  - LFENCE; indirect branch
-			retpoline,amd     - alias for retpoline,lfence
-			eibrs		  - enhanced IBRS
-			eibrs,retpoline   - enhanced IBRS + Retpolines
-			eibrs,lfence      - enhanced IBRS + LFENCE
+			retpoline,generic - google's original retpoline
+			retpoline,amd     - AMD-specific minimal thunk
 
 			Not specifying this option is equivalent to
 			spectre_v2=auto.
@@ -4529,6 +4521,15 @@ bytes respectively. Such letter suffixes can also be entirely omitted.
 			see Documentation/watchdog/watchdog-parameters.txt
 			or other driver-specific files in the
 			Documentation/watchdog/ directory.
+
+	workqueue.watchdog_thresh=
+			If CONFIG_WQ_WATCHDOG is configured, workqueue can
+			warn stall conditions and dump internal state to
+			help debugging.  0 disables workqueue stall
+			detection; otherwise, it's the stall threshold
+			duration in seconds.  The default value is 30 and
+			it can be updated at runtime by writing to the
+			corresponding sysfs file.
 
 	workqueue.disable_numa
 			By default, all work items queued to unbound

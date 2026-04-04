@@ -65,7 +65,7 @@ config ARM64
 	select HAVE_ARCH_MMAP_RND_COMPAT_BITS if COMPAT
 	select HAVE_ARCH_SECCOMP_FILTER
 	select HAVE_ARCH_TRACEHOOK
-	select HAVE_BPF_JIT
+	select HAVE_EBPF_JIT
 	select HAVE_C_RECORDMCOUNT
 	select HAVE_CC_STACKPROTECTOR
 	select HAVE_CMPXCHG_DOUBLE
@@ -88,8 +88,10 @@ config ARM64
 	select HAVE_PERF_EVENTS
 	select HAVE_PERF_REGS
 	select HAVE_PERF_USER_STACK_DUMP
+	select HAVE_REGS_AND_STACK_ACCESS_API
 	select HAVE_RCU_TABLE_FREE
 	select HAVE_SYSCALL_TRACEPOINTS
+	select HAVE_KPROBES
 	select IOMMU_DMA if IOMMU_SUPPORT
 	select IRQ_DOMAIN
 	select IRQ_FORCED_THREADING
@@ -232,6 +234,8 @@ source "init/Kconfig"
 source "kernel/Kconfig.freezer"
 
 source "arch/arm64/Kconfig.platforms"
+
+source "arch/arm64/mach-exynos/Kconfig"
 
 menu "Bus support"
 
@@ -1019,7 +1023,6 @@ config ARM64_MODULE_CMODEL_LARGE
 
 config ARM64_MODULE_PLTS
 	bool
-	select ARM64_MODULE_CMODEL_LARGE
 	select HAVE_MOD_ARCH_SPECIFIC
 
 config RELOCATABLE
@@ -1053,12 +1056,12 @@ config RANDOMIZE_BASE
 	  If unsure, say N.
 
 config RANDOMIZE_MODULE_REGION_FULL
-	bool "Randomize the module region independently from the core kernel"
-	depends on RANDOMIZE_BASE && !DYNAMIC_FTRACE
+	bool "Randomize the module region over a 4 GB range"
+	depends on RANDOMIZE_BASE && !DYNAMIC_FTRACE && !LTO_CLANG
 	default y
 	help
-	  Randomizes the location of the module region without considering the
-	  location of the core kernel. This way, it is impossible for modules
+	  Randomizes the location of the module region inside a 4 GB window
+	  covering the core kernel. This way, it is less likely for modules
 	  to leak information about the location of core kernel data structures
 	  but it does imply that function calls between modules and the core
 	  kernel will need to be resolved via veneers in the module PLT.
@@ -1385,8 +1388,6 @@ source "fs/Kconfig"
 source "arch/arm64/kvm/Kconfig"
 
 source "arch/arm64/Kconfig.debug"
-
-source "arch/arm64/Kconfig.exynos"
 
 source "security/Kconfig"
 

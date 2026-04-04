@@ -124,9 +124,11 @@ static int __init fimc_is_lib_mem_alloc(char *str)
 		addr = LIB_START;
 	}
 
-	if (addr != LIB_START)
+	if (addr != LIB_START) {
 		probe_warn("use different address [reserve-fimc=0x%lx default:0x%lx]",
 				addr, LIB_START);
+		addr = LIB_START;
+	}
 
 	fimc_is_lib_vm.phys_addr = memblock_alloc(LIB_SIZE, SZ_2M);
 	fimc_is_lib_vm.addr = (void *)addr;

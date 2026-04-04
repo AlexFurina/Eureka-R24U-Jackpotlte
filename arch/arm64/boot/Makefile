@@ -16,7 +16,7 @@
 
 include $(srctree)/arch/arm64/boot/dts/Makefile
 
-targets := Image dtbo.img dtb.img
+targets := Image
 
 #DTB_NAMES := $(subst $\",,$(CONFIG_BUILD_ARM64_APPENDED_DTB_IMAGE_NAMES))
 #ifneq ($(DTB_NAMES),)
@@ -28,6 +28,15 @@ targets := Image dtbo.img dtb.img
 
 DTB_OBJS := $(shell find $(obj)/dts/ -name \*.dtb)
 DTBO_OBJS := $(shell find $(obj)/dts/ -name \*.dtbo)
+
+ifeq ($(CONFIG_EXYNOS_DTBTOOL),y)
+targets += dtb.img
+
+DTB_OBJS += $(shell find -L $(obj)/dts/ -name \*.dtb)
+
+$(obj)/dtb.img: $(DTB_OBJS) FORCE
+	$(call if_changed,dtbtool_exynos)
+endif
 
 $(obj)/Image: vmlinux FORCE
 	$(call if_changed,objcopy)
@@ -52,12 +61,6 @@ $(obj)/Image.lzo: $(obj)/Image FORCE
 
 $(obj)/Image.gz-dtb: $(obj)/Image.gz $(DTB_OBJS) FORCE
 	$(call if_changed,cat)
-
-$(obj)/dtbo.img: $(DTBO_OBJS) FORCE
-	$(call if_changed,mkdtimg)
-
-$(obj)/dtb.img: $(DTB_OBJS) FORCE
-	$(call if_changed,mkdtimg)
 
 install: $(obj)/Image
 	$(CONFIG_SHELL) $(srctree)/$(src)/install.sh $(KERNELRELEASE) \

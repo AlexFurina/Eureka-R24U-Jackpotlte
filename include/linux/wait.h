@@ -218,7 +218,7 @@ wait_queue_head_t *bit_waitqueue(void *, int);
  * non-blocking polls (e.g. epoll) are notified that the queue is going away.
  *
  * The caller must also RCU-delay the freeing of the wait_queue_head, e.g. via
- * an explicit synchronize_rcu() or call_rcu(), or via SLAB_DESTROY_BY_RCU.
+ * an explicit synchronize_rcu() or call_rcu(), or via SLAB_TYPESAFE_BY_RCU.
  */
 static inline void wake_up_pollfree(wait_queue_head_t *wq_head)
 {
@@ -594,6 +594,19 @@ do {									\
 	might_sleep();							\
 	if (!(condition))						\
 		__ret = __wait_event_interruptible_exclusive(wq, condition);\
+	__ret;								\
+})
+
+#define __wait_event_killable_exclusive(wq, condition)			\
+	___wait_event(wq, condition, TASK_KILLABLE, 1, 0,		\
+		      schedule())
+
+#define wait_event_killable_exclusive(wq, condition)			\
+({									\
+	int __ret = 0;							\
+	might_sleep();							\
+	if (!(condition))						\
+		__ret = __wait_event_killable_exclusive(wq, condition);	\
 	__ret;								\
 })
 

@@ -1530,7 +1530,7 @@ ncm_bind(struct usb_configuration *c, struct usb_function *f)
 		fs_ncm_notify_desc.bEndpointAddress;
 
 	status = usb_assign_descriptors(f, ncm_fs_function, ncm_hs_function,
-			ncm_ss_function);
+			ncm_ss_function, NULL);
 	if (status)
 		goto fail;
 	

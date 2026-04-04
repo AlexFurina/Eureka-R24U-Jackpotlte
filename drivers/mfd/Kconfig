@@ -928,26 +928,6 @@ config MFD_S2MPB02
 	  This driver provides common support for accessing the device;
 	  additional drivers
 
-config MFD_S2MU106
-    bool "SAMSUNG Electronics IF PMIC Series Support"
-    depends on I2C=y
-    select MFD_CORE
-    help
-     Support for the Samsung Electronics MFD series.
-     This driver provides common support for accessing the device,
-     additional drivers must be enabled in order to use the functionality
-     of the device
-
-config MFD_S2MU205
-    bool "SAMSUNG Electronics IF PMIC Series Support"
-    depends on I2C=y
-    select MFD_CORE
-    help
-     Support for the Samsung Electronics MFD series.
-     This driver provides common support for accessing the device,
-     additional drivers must be enabled in order to use the functionality
-     of the device
-
 config MFD_S2MU004
     bool "SAMSUNG Electronics IF PMIC Series Support"
     depends on I2C=y
@@ -957,25 +937,6 @@ config MFD_S2MU004
      This driver provides common support for accessing the device,
      additional drivers must be enabled in order to use the functionality
      of the device
-
-config MFD_S2MU005
-	bool "SAMSUNG Electronics IF PMIC S2MU005 Series Support"
-	depends on I2C=y
-	select MFD_CORE
-	help
-	 Support for the Samsung Electronics MFD series.
-	 This driver provides common support for accessing the device,
-	 additional drivers must be enabled in order to use the functionality
-	 of the device
-
-config S2MU005_SUPPORT_BC1P2_CERTI
-	bool "S2MU005 Support BC 1.2 Certification"
-	depends on I2C=y
-	select MFD_S2MU005
-	help
-	 Support for the BC 1.2 Certification.
-	 This driver provides common support for accessing the device,
-	 additional drivers must be enabled in order to use the functionality
 
 config MFD_SI476X_CORE
 	tristate "Silicon Laboratories 4761/64/68 AM/FM radio."

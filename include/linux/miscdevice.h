@@ -51,6 +51,7 @@
 #define UHID_MINOR		239
 #define USERIO_MINOR		240
 #define MISC_DYNAMIC_MINOR	255
+#define HWRNG_MINOR		256
 
 struct device;
 struct attribute_group;

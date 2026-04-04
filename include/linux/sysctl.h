@@ -57,6 +57,9 @@ extern int proc_doulongvec_ms_jiffies_minmax(struct ctl_table *table, int,
 				      void __user *, size_t *, loff_t *);
 extern int proc_do_large_bitmap(struct ctl_table *, int,
 				void __user *, size_t *, loff_t *);
+extern int proc_do_static_key(struct ctl_table *table, int write,
+			      void __user *buffer, size_t *lenp,
+			      loff_t *ppos);
 
 /*
  * Register a set of sysctl names by calling register_sysctl_table
@@ -156,8 +159,7 @@ struct ctl_table_set {
 
 struct ctl_table_root {
 	struct ctl_table_set default_set;
-	struct ctl_table_set *(*lookup)(struct ctl_table_root *root,
-					   struct nsproxy *namespaces);
+	struct ctl_table_set *(*lookup)(struct ctl_table_root *root);
 	int (*permissions)(struct ctl_table_header *head, struct ctl_table *table);
 };
 

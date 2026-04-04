@@ -1046,7 +1046,7 @@ static noinline int bpf_jit_insn(struct bpf_jit *jit, struct bpf_prog *fp, int i
 		}
 		break;
 	}
-	case BPF_JMP | BPF_CALL | BPF_X:
+	case BPF_JMP | BPF_TAIL_CALL:
 		/*
 		 * Implicit input:
 		 *  B1: pointer to ctx
@@ -1317,6 +1317,14 @@ static int bpf_jit_prog(struct bpf_jit *jit, struct bpf_prog *fp)
 }
 
 /*
+ * Classic BPF function stub. BPF programs will be converted into
+ * eBPF and then bpf_int_jit_compile() will be called.
+ */
+void bpf_jit_compile(struct bpf_prog *fp)
+{
+}
+
+/*
  * Compile eBPF program "fp"
  */
 struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *fp)
@@ -1325,7 +1333,7 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *fp)
 	struct bpf_jit jit;
 	int pass;
 
-	if (!bpf_jit_enable)
+	if (!fp->jit_requested)
 		return fp;
 
 	memset(&jit, 0, sizeof(jit));
@@ -1357,7 +1365,7 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *fp)
 			print_fn_code(jit.prg_buf, jit.size_prg);
 	}
 	if (jit.prg_buf) {
-		set_memory_ro((unsigned long)header, header->pages);
+		bpf_jit_binary_lock_ro(header);
 		fp->bpf_func = (void *) jit.prg_buf;
 		fp->jited = 1;
 	}

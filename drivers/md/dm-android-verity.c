@@ -691,7 +691,7 @@ static int create_linear_device(struct dm_target *ti, dev_t dev,
 static int android_verity_ctr(struct dm_target *ti, unsigned argc, char **argv)
 {
 	dev_t uninitialized_var(dev);
-	struct android_metadata *metadata = NULL;
+	struct android_metadata *metadata;
 	int err = 0, i, mode;
 	char *key_id, *table_ptr, dummy, *target_device,
 	*verity_table_args[VERITY_TABLE_ARGS + 2 + VERITY_TABLE_OPT_FEC_ARGS];
@@ -713,15 +713,15 @@ static int android_verity_ctr(struct dm_target *ti, unsigned argc, char **argv)
 			handle_error();
 			return -EINVAL;
 		}
-	} else if (argc == 2)
-		key_id = argv[1];
-	else {
+		target_device = argv[0];
+	} else if (argc == 2) {
+		key_id = argv[0];
+		target_device = argv[1];
+	} else {
 		DMERR("Incorrect number of arguments");
 		handle_error();
 		return -EINVAL;
 	}
-
-	target_device = argv[0];
 
 	dev = name_to_dev_t(target_device);
 	if (!dev) {
@@ -753,7 +753,7 @@ static int android_verity_ctr(struct dm_target *ti, unsigned argc, char **argv)
 		}
 		DMERR("Error while extracting metadata");
 		handle_error();
-		goto free_metadata;
+		return err;
 	}
 
 	if (verity_enabled) {
@@ -885,11 +885,10 @@ static int android_verity_ctr(struct dm_target *ti, unsigned argc, char **argv)
 	}
 
 free_metadata:
-	if (metadata) {
-		kfree(metadata->header);
-		kfree(metadata->verity_table);
-	}
+	kfree(metadata->header);
+	kfree(metadata->verity_table);
 	kfree(metadata);
+
 	return err;
 }
 

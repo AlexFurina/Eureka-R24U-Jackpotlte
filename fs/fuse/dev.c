@@ -101,19 +101,6 @@ void fuse_request_free(struct fuse_req *req)
 	kmem_cache_free(fuse_req_cachep, req);
 }
 
-static void block_sigs(sigset_t *oldset)
-{
-	sigset_t mask;
-
-	siginitsetinv(&mask, sigmask(SIGKILL));
-	sigprocmask(SIG_BLOCK, &mask, oldset);
-}
-
-static void restore_sigs(sigset_t *oldset)
-{
-	sigprocmask(SIG_SETMASK, oldset, NULL);
-}
-
 void __fuse_get_request(struct fuse_req *req)
 {
 	atomic_inc(&req->count);
@@ -167,15 +154,9 @@ static struct fuse_req *__fuse_get_req(struct fuse_conn *fc, unsigned npages,
 	atomic_inc(&fc->num_waiting);
 
 	if (fuse_block_alloc(fc, for_background)) {
-		sigset_t oldset;
-		int intr;
-
-		block_sigs(&oldset);
-		intr = wait_event_interruptible_exclusive(fc->blocked_waitq,
-				!fuse_block_alloc(fc, for_background));
-		restore_sigs(&oldset);
 		err = -EINTR;
-		if (intr)
+		if (wait_event_killable_exclusive(fc->blocked_waitq,
+				!fuse_block_alloc(fc, for_background)))
 			goto out;
 	}
 	/* Matches smp_wmb() in fuse_set_initialized() */
@@ -475,14 +456,9 @@ static void request_wait_answer(struct fuse_conn *fc, struct fuse_req *req)
 	}
 
 	if (!test_bit(FR_FORCE, &req->flags)) {
-		sigset_t oldset;
-
 		/* Only fatal signals may interrupt this */
-		block_sigs(&oldset);
-		err = wait_event_interruptible(req->waitq,
+		err = wait_event_killable(req->waitq,
 					test_bit(FR_FINISHED, &req->flags));
-		restore_sigs(&oldset);
-
 		if (!err)
 			return;
 
@@ -1453,7 +1429,6 @@ static ssize_t fuse_dev_splice_read(struct file *in, loff_t *ppos,
 		goto out;
 
 	ret = 0;
-	pipe_lock(pipe);
 
 	if (!pipe->readers) {
 		send_sig(SIGPIPE, current, 0);
@@ -1489,7 +1464,6 @@ static ssize_t fuse_dev_splice_read(struct file *in, loff_t *ppos,
 	}
 
 out_unlock:
-	pipe_unlock(pipe);
 
 	if (do_wakeup) {
 		smp_mb();
@@ -2126,7 +2100,7 @@ out_free:
 	for (idx = 0; idx < nbuf; idx++) {
 		struct pipe_buffer *buf = &bufs[idx];
 		if (buf->ops)
-			buf->ops->release(pipe, buf);
+			pipe_buf_release(pipe, buf);
 	}
 	pipe_unlock(pipe);
 
@@ -2337,37 +2311,53 @@ static int fuse_device_clone(struct fuse_conn *fc, struct file *new)
 static long fuse_dev_ioctl(struct file *file, unsigned int cmd,
 			   unsigned long arg)
 {
-	int err = -ENOTTY;
+	int res;
+	int oldfd;
+	struct fuse_dev *fud = NULL;
+	struct fuse_passthrough_out pto;
 
-	if (cmd == FUSE_DEV_IOC_CLONE) {
-		int oldfd;
-
-		err = -EFAULT;
-		if (!get_user(oldfd, (__u32 __user *) arg)) {
+	switch (cmd) {
+	case FUSE_DEV_IOC_CLONE:
+		res = -EFAULT;
+		if (!get_user(oldfd, (__u32 __user *)arg)) {
 			struct file *old = fget(oldfd);
 
-			err = -EINVAL;
+			res = -EINVAL;
 			if (old) {
-				struct fuse_dev *fud = NULL;
-
 				/*
 				 * Check against file->f_op because CUSE
 				 * uses the same ioctl handler.
 				 */
 				if (old->f_op == file->f_op &&
-				    old->f_cred->user_ns == file->f_cred->user_ns)
+				    old->f_cred->user_ns ==
+					    file->f_cred->user_ns)
 					fud = fuse_get_dev(old);
 
 				if (fud) {
 					mutex_lock(&fuse_mutex);
-					err = fuse_device_clone(fud->fc, file);
+					res = fuse_device_clone(fud->fc, file);
 					mutex_unlock(&fuse_mutex);
 				}
 				fput(old);
 			}
 		}
+		break;
+	case FUSE_DEV_IOC_PASSTHROUGH_OPEN:
+		res = -EFAULT;
+		if (!copy_from_user(&pto,
+				    (struct fuse_passthrough_out __user *)arg,
+				    sizeof(pto))) {
+			res = -EINVAL;
+			fud = fuse_get_dev(file);
+			if (fud)
+				res = fuse_passthrough_open(fud, &pto);
+		}
+		break;
+	default:
+		res = -ENOTTY;
+		break;
 	}
-	return err;
+	return res;
 }
 
 const struct file_operations fuse_dev_operations = {

@@ -146,7 +146,7 @@ static void fuse_invalidate_entry(struct dentry *entry)
 }
 
 static void fuse_lookup_init(struct fuse_conn *fc, struct fuse_args *args,
-			     u64 nodeid, struct qstr *name,
+			     u64 nodeid, const struct qstr *name,
 			     struct fuse_entry_out *outarg)
 {
 	memset(outarg, 0, sizeof(struct fuse_entry_out));
@@ -334,7 +334,7 @@ bool fuse_invalid_attr(struct fuse_attr *attr)
 		attr->size > LLONG_MAX;
 }
 
-int fuse_lookup_name(struct super_block *sb, u64 nodeid, struct qstr *name,
+int fuse_lookup_name(struct super_block *sb, u64 nodeid, const struct qstr *name,
 		     struct fuse_entry_out *outarg, struct inode **inode)
 {
 	struct fuse_conn *fc = get_fuse_conn_super(sb);
@@ -393,8 +393,10 @@ static struct dentry *fuse_lookup(struct inode *dir, struct dentry *entry,
 	struct dentry *newent;
 	bool outarg_valid = true;
 
+	fuse_lock_inode(dir);
 	err = fuse_lookup_name(dir->i_sb, get_node_id(dir), &entry->d_name,
 			       &outarg, &inode);
+	fuse_unlock_inode(dir);
 	if (err == -ENOENT) {
 		outarg_valid = false;
 		err = 0;
@@ -492,6 +494,7 @@ static int fuse_create_open(struct inode *dir, struct dentry *entry,
 	ff->fh = outopen.fh;
 	ff->nodeid = outentry.nodeid;
 	ff->open_flags = outopen.open_flags;
+	fuse_passthrough_setup(fc, ff, &outopen);
 	inode = fuse_iget(dir->i_sb, outentry.nodeid, outentry.generation,
 			  &outentry.attr, entry_attr_timeout(&outentry), 0);
 	if (!inode) {
@@ -531,7 +534,7 @@ static int fuse_atomic_open(struct inode *dir, struct dentry *entry,
 	struct fuse_conn *fc = get_fuse_conn(dir);
 	struct dentry *res = NULL;
 
-	if (d_unhashed(entry)) {
+	if (d_can_lookup(entry)) {
 		res = fuse_lookup(dir, entry, 0);
 		if (IS_ERR(res))
 			return PTR_ERR(res);
@@ -1401,7 +1404,9 @@ static int fuse_readdir(struct file *file, struct dir_context *ctx)
 		fuse_read_fill(req, file, ctx->pos, PAGE_SIZE,
 			       FUSE_READDIR);
 	}
+	fuse_lock_inode(inode);
 	fuse_request_send(fc, req);
+	fuse_unlock_inode(inode);
 	nbytes = req->out.args[0].size;
 	err = req->out.h.error;
 	fuse_put_request(fc, req);
@@ -1642,9 +1647,10 @@ int fuse_flush_times(struct inode *inode, struct fuse_file *ff)
  * vmtruncate() doesn't allow for this case, so do the rlimit checking
  * and the actual truncation by hand.
  */
-int fuse_do_setattr(struct inode *inode, struct iattr *attr,
+int fuse_do_setattr(struct dentry *dentry, struct iattr *attr,
 		    struct file *file)
 {
+	struct inode *inode = d_inode(dentry);
 	struct fuse_conn *fc = get_fuse_conn(inode);
 	struct fuse_inode *fi = get_fuse_inode(inode);
 	FUSE_ARGS(args);
@@ -1778,6 +1784,7 @@ error:
 static int fuse_setattr(struct dentry *entry, struct iattr *attr)
 {
 	struct inode *inode = d_inode(entry);
+	struct fuse_conn *fc = get_fuse_conn(inode);
 	struct file *file = (attr->ia_valid & ATTR_FILE) ? attr->ia_file : NULL;
 	int ret;
 
@@ -1785,33 +1792,42 @@ static int fuse_setattr(struct dentry *entry, struct iattr *attr)
 		return -EACCES;
 
 	if (attr->ia_valid & (ATTR_KILL_SUID | ATTR_KILL_SGID)) {
-		int kill;
-
 		attr->ia_valid &= ~(ATTR_KILL_SUID | ATTR_KILL_SGID |
 				    ATTR_MODE);
-		/*
-		 * ia_mode calculation may have used stale i_mode.  Refresh and
-		 * recalculate.
-		 */
-		ret = fuse_do_getattr(inode, NULL, file);
-		if (ret)
-			return ret;
 
-		attr->ia_mode = inode->i_mode;
-		kill = should_remove_suid(entry);
-		if (kill & ATTR_KILL_SUID) {
-			attr->ia_valid |= ATTR_MODE;
-			attr->ia_mode &= ~S_ISUID;
-		}
-		if (kill & ATTR_KILL_SGID) {
-			attr->ia_valid |= ATTR_MODE;
-			attr->ia_mode &= ~S_ISGID;
+		/*
+		 * The only sane way to reliably kill suid/sgid is to do it in
+		 * the userspace filesystem
+		 *
+		 * This should be done on write(), truncate() and chown().
+		 */
+		if (!fc->handle_killpriv) {
+			int kill;
+
+			/*
+			 * ia_mode calculation may have used stale i_mode.
+			 * Refresh and recalculate.
+			 */
+			ret = fuse_do_getattr(inode, NULL, file);
+			if (ret)
+				return ret;
+
+			attr->ia_mode = inode->i_mode;
+			kill = should_remove_suid(entry);
+			if (kill & ATTR_KILL_SUID) {
+				attr->ia_valid |= ATTR_MODE;
+				attr->ia_mode &= ~S_ISUID;
+			}
+			if (kill & ATTR_KILL_SGID) {
+				attr->ia_valid |= ATTR_MODE;
+				attr->ia_mode &= ~S_ISGID;
+			}
 		}
 	}
 	if (!attr->ia_valid)
 		return 0;
 
-	ret = fuse_do_setattr(inode, attr, file);
+	ret = fuse_do_setattr(entry, attr, file);
 	if (!ret) {
 		/* Directory mode changed, may need to revalidate access */
 		if (d_is_dir(entry) && (attr->ia_valid & ATTR_MODE))

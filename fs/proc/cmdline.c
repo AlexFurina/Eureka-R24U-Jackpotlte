@@ -4,11 +4,16 @@
 #include <linux/seq_file.h>
 #include <asm/setup.h>
 
-static char proc_cmdline[COMMAND_LINE_SIZE];
+enum {
+	FLAG_DELETE = 0,
+	FLAG_REPLACE,
+};
+
+static char new_command_line[COMMAND_LINE_SIZE];
 
 static int cmdline_proc_show(struct seq_file *m, void *v)
 {
-	seq_puts(m, proc_cmdline);
+	seq_puts(m, new_command_line);
 	seq_putc(m, '\n');
 	return 0;
 }
@@ -25,52 +30,85 @@ static const struct file_operations cmdline_proc_fops = {
 	.release	= single_release,
 };
 
-static void remove_flag(char *cmd, const char *flag)
+#ifdef CONFIG_PROC_SPOOF_CMDLINE
+static int process_flag(int replace, const char *flag, const char *new_var)
 {
-	char *start_addr, *end_addr;
+	char *start_flag, *end_flag, *next_flag;
+	char *last_char = new_command_line + COMMAND_LINE_SIZE;
+	size_t rest_len, flag_len, cmd_len, var_len, nvar_len;
+	int ret = 0;
 
 	/* Ensure all instances of a flag are removed */
-	while ((start_addr = strstr(cmd, flag))) {
-		end_addr = strchr(start_addr, ' ');
-		if (end_addr)
-			memmove(start_addr, end_addr + 1, strlen(end_addr));
-		else
-			*(start_addr - 1) = '\0';
-	}
-}
+	while ((start_flag = strnstr(new_command_line, flag, COMMAND_LINE_SIZE))) {
+		end_flag = strnchr(start_flag, last_char - start_flag, ' ');
 
-static void remove_safetynet_flags(char *cmd)
-{
-	remove_flag(cmd, "androidboot.enable_dm_verity=");
-	remove_flag(cmd, "androidboot.secboot=");
-	remove_flag(cmd, "androidboot.veritymode=");
+		/* this may happend when copied cmdline is filled up fully */
+		if (end_flag > last_char)
+			end_flag = last_char;
+
+		cmd_len = strlen(new_command_line);
+		if (unlikely(cmd_len > COMMAND_LINE_SIZE))
+			break;
+
+		next_flag = end_flag + 1;
+		rest_len = (size_t)(last_char - end_flag);
+		flag_len = (size_t)(end_flag - start_flag);
+
+		if (replace) {
+			if (!new_var)
+				break;
+
+			nvar_len = strlen(new_var);
+			var_len = flag_len - strlen(flag);
+
+			// sanity check
+			if (nvar_len > var_len &&
+			    (cmd_len + (nvar_len - var_len)) > COMMAND_LINE_SIZE)
+				break;
+		}
+
+		if (rest_len)
+			memmove(start_flag, next_flag, rest_len);
+
+		memset(last_char - flag_len, '\0', flag_len);
+
+		ret++;
+
+		/* remove token first, insert at the last */
+		if (replace) {
+			cmd_len = strlen(new_command_line);
+			if (unlikely(cmd_len > COMMAND_LINE_SIZE))
+				break;
+
+			sprintf(new_command_line + cmd_len, " %s%s", flag, new_var);
+
+			// TODO: restrict rest space clean
+
+			/* avoid dead loop */
+			break;
+		}
+	}
+
+	return ret;
 }
+#endif
 
 static int __init proc_cmdline_init(void)
 {
-	/* SafetyNet bypass: show androidboot.verifiedbootstate=green */
-	char *a1, *a2;
+	memcpy(new_command_line, saved_command_line,
+		min((size_t)COMMAND_LINE_SIZE, strlen(saved_command_line)));
 
-	a1 = strstr(saved_command_line, "androidboot.verifiedbootstate=");
-	if (a1) {
-		a1 = strchr(a1, '=');
-		a2 = strchr(a1, ' ');
-		if (!a2) /* last argument on the cmdline */
-			a2 = "";
-
-		scnprintf(proc_cmdline, COMMAND_LINE_SIZE, "%.*sgreen%s",
-			  (int)(a1 - saved_command_line + 1),
-			  saved_command_line, a2);
-	} else {
-		strncpy(proc_cmdline, saved_command_line, COMMAND_LINE_SIZE);
-	}
-	
+#ifdef CONFIG_PROC_SPOOF_CMDLINE
 	/*
 	 * Remove various flags from command line seen by userspace in order to
 	 * pass SafetyNet CTS check.
 	 */
-	remove_safetynet_flags(proc_cmdline);
-	
+	process_flag(FLAG_REPLACE, "androidboot.verifiedbootstate=", "green"); // Play Integrity API / SafetyNet
+	process_flag(FLAG_REPLACE, "androidboot.warranty_bit=", "0"); // Bootloader status and Knox
+	process_flag(FLAG_REPLACE, "androidboot.fmp_config=", "1"); // Samsung Knox FMP / FIPS
+	process_flag(FLAG_REPLACE, "androidboot.vbmeta.device_state=", "locked");
+#endif
+
 	proc_create("cmdline", 0, NULL, &cmdline_proc_fops);
 	return 0;
 }

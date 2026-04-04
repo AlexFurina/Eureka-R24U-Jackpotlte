@@ -870,7 +870,8 @@ struct user_struct {
 	struct hlist_node uidhash_node;
 	kuid_t uid;
 
-#if defined(CONFIG_PERF_EVENTS) || defined(CONFIG_BPF_SYSCALL)
+#if defined(CONFIG_PERF_EVENTS) || defined(CONFIG_BPF_SYSCALL) || \
+    defined(CONFIG_NET)
 	atomic_long_t locked_vm;
 #endif
 };
@@ -1506,12 +1507,12 @@ struct sched_rt_entity {
 	struct hrtimer schedtune_timer;
 
 	struct sched_rt_entity *back;
+	/* rq "owned" by this entity/group: */
+	struct rt_rq		*my_q;
 #ifdef CONFIG_RT_GROUP_SCHED
 	struct sched_rt_entity	*parent;
 	/* rq on which this entity is (to be) queued: */
 	struct rt_rq		*rt_rq;
-	/* rq "owned" by this entity/group: */
-	struct rt_rq		*my_q;
 #endif
 #ifdef CONFIG_SMP
 	/* Per entity load average tracking */
@@ -1579,10 +1580,6 @@ union rcu_special {
 	u32 s; /* Set of bits. */
 };
 struct rcu_node;
-
-#ifdef CONFIG_FIVE
-struct task_integrity;
-#endif
 
 enum perf_event_task_context {
 	perf_invalid_context = -1,
@@ -1733,6 +1730,8 @@ struct task_struct {
 #ifdef CONFIG_CGROUPS
 	/* disallow userland-initiated cgroup migration */
 	unsigned no_cgroup_migration:1;
+	/* task is frozen/stopped (used by the cgroup freezer) */
+	unsigned			frozen:1;
 #endif
 
 	unsigned long atomic_flags; /* Flags needing atomic access. */
@@ -2125,9 +2124,6 @@ struct task_struct {
 #endif
 #ifdef CONFIG_PREEMPT_RT_FULL
 	int xmit_recursion;
-#endif
-#ifdef CONFIG_FIVE
-	struct task_integrity *integrity;
 #endif
 	int pagefault_disabled;
 /* CPU-specific state of this task */
@@ -2537,6 +2533,7 @@ TASK_PFA_SET(SPEC_IB_FORCE_DISABLE, spec_ib_force_disable)
 #define JOBCTL_TRAP_NOTIFY_BIT	20	/* trap for NOTIFY */
 #define JOBCTL_TRAPPING_BIT	21	/* switching to TRACED */
 #define JOBCTL_LISTENING_BIT	22	/* ptracer is listening for events */
+#define JOBCTL_TRAP_FREEZE_BIT	23	/* trap for cgroup freezer */
 
 #define JOBCTL_STOP_DEQUEUED	(1UL << JOBCTL_STOP_DEQUEUED_BIT)
 #define JOBCTL_STOP_PENDING	(1UL << JOBCTL_STOP_PENDING_BIT)
@@ -2545,6 +2542,7 @@ TASK_PFA_SET(SPEC_IB_FORCE_DISABLE, spec_ib_force_disable)
 #define JOBCTL_TRAP_NOTIFY	(1UL << JOBCTL_TRAP_NOTIFY_BIT)
 #define JOBCTL_TRAPPING		(1UL << JOBCTL_TRAPPING_BIT)
 #define JOBCTL_LISTENING	(1UL << JOBCTL_LISTENING_BIT)
+#define JOBCTL_TRAP_FREEZE	(1UL << JOBCTL_TRAP_FREEZE_BIT)
 
 #define JOBCTL_TRAP_MASK	(JOBCTL_TRAP_STOP | JOBCTL_TRAP_NOTIFY)
 #define JOBCTL_PENDING_MASK	(JOBCTL_STOP_PENDING | JOBCTL_TRAP_MASK)
@@ -2750,8 +2748,12 @@ extern int sched_setscheduler(struct task_struct *, int,
 			      const struct sched_param *);
 extern int sched_setscheduler_nocheck(struct task_struct *, int,
 				      const struct sched_param *);
+extern int sched_set_fifo(struct task_struct *p);
+extern int sched_set_fifo_low(struct task_struct *p);
+extern int sched_set_normal(struct task_struct *p, int nice);
 extern int sched_setattr(struct task_struct *,
 			 const struct sched_attr *);
+extern int sched_setattr_nocheck(struct task_struct *, const struct sched_attr *);
 extern struct task_struct *idle_task(int cpu);
 /**
  * is_idle_task - is the specified task an idle task?

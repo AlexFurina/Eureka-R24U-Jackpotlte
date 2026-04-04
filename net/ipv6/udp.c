@@ -56,6 +56,16 @@
 #include <trace/events/skb.h>
 #include "udp_impl.h"
 
+static bool udp6_lib_exact_dif_match(struct net *net, struct sk_buff *skb)
+{
+#if defined(CONFIG_NET_L3_MASTER_DEV)
+	if (!net->ipv4.sysctl_udp_l3mdev_accept &&
+	    skb && ipv6_l3mdev_skb(IP6CB(skb)->flags))
+		return true;
+#endif
+	return false;
+}
+
 static u32 udp6_ehashfn(const struct net *net,
 			const struct in6_addr *laddr,
 			const u16 lport,
@@ -120,7 +130,7 @@ static inline int compute_score(struct sock *sk, struct net *net,
 				unsigned short hnum,
 				const struct in6_addr *saddr, __be16 sport,
 				const struct in6_addr *daddr, __be16 dport,
-				int dif)
+				int dif, int sdif, bool exact_dif)
 {
 	int score;
 	struct inet_sock *inet;
@@ -151,10 +161,14 @@ static inline int compute_score(struct sock *sk, struct net *net,
 		score++;
 	}
 
-	if (sk->sk_bound_dev_if) {
-		if (sk->sk_bound_dev_if != dif)
+	if (sk->sk_bound_dev_if || exact_dif) {
+		bool dev_match = (sk->sk_bound_dev_if == dif ||
+				  sk->sk_bound_dev_if == sdif);
+
+		if (!dev_match)
 			return -1;
-		score++;
+		if (sk->sk_bound_dev_if)
+			score++;
 	}
 
 	if (sk->sk_incoming_cpu == raw_smp_processor_id())
@@ -166,7 +180,8 @@ static inline int compute_score(struct sock *sk, struct net *net,
 static inline int compute_score2(struct sock *sk, struct net *net,
 				 const struct in6_addr *saddr, __be16 sport,
 				 const struct in6_addr *daddr,
-				 unsigned short hnum, int dif)
+				 unsigned short hnum, int dif,
+				 int sdif, bool exact_dif)
 {
 	int score;
 	struct inet_sock *inet;
@@ -194,7 +209,7 @@ static inline int compute_score2(struct sock *sk, struct net *net,
 		score++;
 	}
 
-	if (sk->sk_bound_dev_if) {
+	if (sk->sk_bound_dev_if || exact_dif) {
 		if (sk->sk_bound_dev_if != dif)
 			return -1;
 		score++;
@@ -209,9 +224,9 @@ static inline int compute_score2(struct sock *sk, struct net *net,
 /* called with read_rcu_lock() */
 static struct sock *udp6_lib_lookup2(struct net *net,
 		const struct in6_addr *saddr, __be16 sport,
-		const struct in6_addr *daddr, unsigned int hnum, int dif,
-		struct udp_hslot *hslot2, unsigned int slot2,
-		struct sk_buff *skb)
+		const struct in6_addr *daddr, unsigned int hnum,
+		int dif, int sdif, bool exact_dif, struct udp_hslot *hslot2,
+		unsigned int slot2, struct sk_buff *skb)
 {
 	struct sock *sk, *result;
 	int score, badness, matches = 0, reuseport = 0;
@@ -221,7 +236,7 @@ static struct sock *udp6_lib_lookup2(struct net *net,
 	badness = -1;
 	udp_portaddr_for_each_entry_rcu(sk, &hslot2->head) {
 		score = compute_score2(sk, net, saddr, sport,
-				      daddr, hnum, dif);
+				      daddr, hnum, dif, sdif, exact_dif);
 		if (score > badness) {
 			reuseport = sk->sk_reuseport;
 			if (reuseport) {
@@ -248,15 +263,16 @@ static struct sock *udp6_lib_lookup2(struct net *net,
 
 /* rcu_read_lock() must be held */
 struct sock *__udp6_lib_lookup(struct net *net,
-				      const struct in6_addr *saddr, __be16 sport,
-				      const struct in6_addr *daddr, __be16 dport,
-				      int dif, struct udp_table *udptable,
-				      struct sk_buff *skb)
+			       const struct in6_addr *saddr, __be16 sport,
+			       const struct in6_addr *daddr, __be16 dport,
+			       int dif, int sdif, struct udp_table *udptable,
+			       struct sk_buff *skb)
 {
 	struct sock *sk, *result;
 	unsigned short hnum = ntohs(dport);
 	unsigned int hash2, slot2, slot = udp_hashfn(net, hnum, udptable->mask);
 	struct udp_hslot *hslot2, *hslot = &udptable->hash[slot];
+	bool exact_dif = udp6_lib_exact_dif_match(net, skb);
 	int score, badness, matches = 0, reuseport = 0;
 	u32 hash = 0;
 
@@ -269,6 +285,7 @@ struct sock *__udp6_lib_lookup(struct net *net,
 
 		result = udp6_lib_lookup2(net, saddr, sport,
 					  daddr, hnum, dif,
+					  sdif, exact_dif,
 					  hslot2, slot2, skb);
 		if (!result) {
 			hash2 = udp6_portaddr_hash(net, &in6addr_any, hnum);
@@ -278,7 +295,8 @@ struct sock *__udp6_lib_lookup(struct net *net,
 				goto begin;
 
 			result = udp6_lib_lookup2(net, saddr, sport,
-						  &in6addr_any, hnum, dif,
+						  &in6addr_any, hnum,
+						  dif, sdif, exact_dif,
 						  hslot2, slot2, skb);
 		}
 		return result;
@@ -287,7 +305,8 @@ begin:
 	result = NULL;
 	badness = -1;
 	sk_for_each_rcu(sk, &hslot->head) {
-		score = compute_score(sk, net, hnum, saddr, sport, daddr, dport, dif);
+		score = compute_score(sk, net, hnum, saddr, sport, daddr, dport, dif,
+				      sdif, exact_dif);
 		if (score > badness) {
 			reuseport = sk->sk_reuseport;
 			if (reuseport) {
@@ -324,7 +343,7 @@ static struct sock *__udp6_lib_lookup_skb(struct sk_buff *skb,
 		return sk;
 	return __udp6_lib_lookup(dev_net(skb_dst(skb)->dev), &iph->saddr, sport,
 				 &iph->daddr, dport, inet6_iif(skb),
-				 udptable, skb);
+				 inet6_sdif(skb), udptable, skb);
 }
 
 /* Must be called under rcu_read_lock().
@@ -338,7 +357,7 @@ struct sock *udp6_lib_lookup(struct net *net, const struct in6_addr *saddr, __be
 	struct sock *sk;
 
 	sk =  __udp6_lib_lookup(net, saddr, sport, daddr, dport,
-				dif, &udp_table, NULL);
+				dif, 0, &udp_table, NULL);
 	if (sk && !atomic_inc_not_zero(&sk->sk_refcnt))
 		sk = NULL;
 	return sk;
@@ -514,7 +533,7 @@ void __udp6_lib_err(struct sk_buff *skb, struct inet6_skb_parm *opt,
 	struct net *net = dev_net(skb->dev);
 
 	sk = __udp6_lib_lookup(net, daddr, uh->dest, saddr, uh->source,
-			       inet6_iif(skb), udptable, NULL);
+			       inet6_iif(skb), 0, udptable, NULL);
 	if (!sk) {
 		ICMP6_INC_STATS_BH(net, __in6_dev_get(skb->dev),
 				   ICMP6_MIB_INERRORS);
@@ -898,7 +917,7 @@ discard:
 static struct sock *__udp6_lib_demux_lookup(struct net *net,
 			__be16 loc_port, const struct in6_addr *loc_addr,
 			__be16 rmt_port, const struct in6_addr *rmt_addr,
-			int dif)
+			int dif, int sdif)
 {
 	struct sock *sk;
 	unsigned short hnum = ntohs(loc_port);
@@ -910,7 +929,7 @@ static struct sock *__udp6_lib_demux_lookup(struct net *net,
 
 	udp_portaddr_for_each_entry_rcu(sk, &hslot2->head) {
 		if (sk->sk_state == TCP_ESTABLISHED &&
-		    INET6_MATCH(sk, net, rmt_addr, loc_addr, ports, dif))
+		    INET6_MATCH(sk, net, rmt_addr, loc_addr, ports, dif, sdif))
 			return sk;
 		/* Only check first socket in chain */
 		break;
@@ -925,6 +944,7 @@ static void udp_v6_early_demux(struct sk_buff *skb)
 	struct sock *sk;
 	struct dst_entry *dst;
 	int dif = skb->dev->ifindex;
+	int sdif = inet6_sdif(skb);
 
 	if (!pskb_may_pull(skb, skb_transport_offset(skb) +
 	    sizeof(struct udphdr)))
@@ -936,7 +956,7 @@ static void udp_v6_early_demux(struct sk_buff *skb)
 		sk = __udp6_lib_demux_lookup(net, uh->dest,
 					     &ipv6_hdr(skb)->daddr,
 					     uh->source, &ipv6_hdr(skb)->saddr,
-					     dif);
+					     dif, sdif);
 	else
 		return;
 
@@ -1146,6 +1166,9 @@ int udpv6_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 	int connected = 0;
 	int is_udplite = IS_UDPLITE(sk);
 	int (*getfrag)(void *, char *, int, int, int, struct sk_buff *);
+	struct sockcm_cookie sockc;
+
+	sockc.tsflags = sk->sk_tsflags;
 
 	/* destination address check */
 	if (sin6) {
@@ -1277,7 +1300,8 @@ do_udp_sendmsg:
 		opt->tot_len = sizeof(*opt);
 
 		err = ip6_datagram_send_ctl(sock_net(sk), sk, msg, &fl6, opt,
-					    &hlimit, &tclass, &dontfrag);
+					    &hlimit, &tclass, &dontfrag,
+					    &sockc);
 		if (err < 0) {
 			fl6_sock_release(flowlabel);
 			return err;
@@ -1341,7 +1365,7 @@ do_udp_sendmsg:
 	} else if (!fl6.flowi6_oif)
 		fl6.flowi6_oif = np->ucast_oif;
 
-	security_sk_classify_flow(sk, flowi6_to_flowi(&fl6));
+	security_sk_classify_flow(sk, flowi6_to_flowi_common(&fl6));
 
 	dst = ip6_sk_dst_lookup_flow(sk, &fl6, final_p);
 	if (IS_ERR(dst)) {
@@ -1367,7 +1391,7 @@ back_from_confirm:
 		skb = ip6_make_skb(sk, getfrag, msg, ulen,
 				   sizeof(struct udphdr), hlimit, tclass, opt,
 				   &fl6, (struct rt6_info *)dst,
-				   msg->msg_flags, dontfrag);
+				   msg->msg_flags, dontfrag, &sockc);
 		err = PTR_ERR(skb);
 		if (!IS_ERR_OR_NULL(skb))
 			err = udp_v6_send_skb(skb, &fl6);
@@ -1394,7 +1418,8 @@ do_append_data:
 	err = ip6_append_data(sk, getfrag, msg, ulen,
 		sizeof(struct udphdr), hlimit, tclass, opt, &fl6,
 		(struct rt6_info *)dst,
-		corkreq ? msg->msg_flags|MSG_MORE : msg->msg_flags, dontfrag);
+		corkreq ? msg->msg_flags|MSG_MORE : msg->msg_flags, dontfrag,
+		&sockc);
 	if (err)
 		udp_v6_flush_pending_frames(sk);
 	else if (!corkreq)

@@ -434,6 +434,7 @@ void tcp_openreq_init_rwin(struct request_sock *req,
 	int mss = dst_metric_advmss(dst);
 	u32 window_clamp;
 	__u8 rcv_wscale;
+	u32 rcv_wnd;
 
 	if (user_mss && user_mss < mss)
 		mss = user_mss;
@@ -447,24 +448,20 @@ void tcp_openreq_init_rwin(struct request_sock *req,
 	    (req->rsk_window_clamp > full_space || req->rsk_window_clamp == 0))
 		req->rsk_window_clamp = full_space;
 
+	rcv_wnd = tcp_rwnd_init_bpf((struct sock *)req);
+	if (rcv_wnd == 0)
+		rcv_wnd = dst_metric(dst, RTAX_INITRWND);
+	else if (full_space < rcv_wnd * mss)
+		full_space = rcv_wnd * mss;
+
 	/* tcp_full_space because it is guaranteed to be the first packet */
-#ifdef CONFIG_MPTCP
-	tp->ops->select_initial_window(tcp_full_space(sk_listener),
-		mss - (ireq->tstamp_ok ? TCPOLEN_TSTAMP_ALIGNED : 0) -
-		(ireq->saw_mpc ? MPTCP_SUB_LEN_DSM_ALIGN : 0),
-#else
 	tcp_select_initial_window(full_space,
 		mss - (ireq->tstamp_ok ? TCPOLEN_TSTAMP_ALIGNED : 0),
-#endif		
 		&req->rsk_rcv_wnd,
 		&req->rsk_window_clamp,
 		ireq->wscale_ok,
 		&rcv_wscale,
-		dst_metric(dst, RTAX_INITRWND)
-#ifdef CONFIG_MPTCP
-		, sk_listener
-#endif
-		);
+		rcv_wnd);
 	ireq->rcv_wscale = rcv_wscale;
 }
 EXPORT_SYMBOL(tcp_openreq_init_rwin);
@@ -534,23 +531,23 @@ struct sock *tcp_create_openreq_child(const struct sock *sk,
 
 		tcp_prequeue_init(newtp);
 		INIT_LIST_HEAD(&newtp->tsq_node);
+		INIT_LIST_HEAD(&newtp->tsorted_sent_queue);
 
 		tcp_init_wl(newtp, treq->rcv_isn);
 
 		newtp->srtt_us = 0;
 		newtp->mdev_us = jiffies_to_usecs(TCP_TIMEOUT_INIT);
-		newtp->rtt_min[0].rtt = ~0U;
+		minmax_reset(&newtp->rtt_min, tcp_jiffies32, ~0U);
 		newicsk->icsk_rto = TCP_TIMEOUT_INIT;
-		newicsk->icsk_ack.lrcvtime = tcp_time_stamp;
+		newicsk->icsk_ack.lrcvtime = tcp_jiffies32;
 
 		newtp->packets_out = 0;
 		newtp->retrans_out = 0;
 		newtp->sacked_out = 0;
 		newtp->fackets_out = 0;
 		newtp->snd_ssthresh = TCP_INFINITE_SSTHRESH;
-		tcp_enable_early_retrans(newtp);
 		newtp->tlp_high_seq = 0;
-		newtp->lsndtime = treq->snt_synack.stamp_jiffies;
+		newtp->lsndtime = tcp_jiffies32;
 		newsk->sk_txhash = treq->txhash;
 		newtp->last_oow_ack_time = 0;
 		newtp->total_retrans = req->num_retrans;
@@ -562,6 +559,9 @@ struct sock *tcp_create_openreq_child(const struct sock *sk,
 		 */
 		newtp->snd_cwnd = TCP_INIT_CWND;
 		newtp->snd_cwnd_cnt = 0;
+
+		/* There's a bubble in the pipe until at least the first ACK. */
+		newtp->app_limited = ~0U;
 
 		tcp_init_xmit_timers(newsk);
 		newtp->write_seq = newtp->pushed_seq = treq->snt_isn + 1;
@@ -578,10 +578,7 @@ struct sock *tcp_create_openreq_child(const struct sock *sk,
 						       keepalive_time_when(newtp));
 
 		newtp->rx_opt.tstamp_ok = ireq->tstamp_ok;
-		if ((newtp->rx_opt.sack_ok = ireq->sack_ok) != 0) {
-			if (sysctl_tcp_fack)
-				tcp_enable_fack(newtp);
-		}
+		newtp->rx_opt.sack_ok = ireq->sack_ok;
 		newtp->window_clamp = req->rsk_window_clamp;
 		newtp->rcv_ssthresh = req->rsk_rcv_wnd;
 		newtp->rcv_wnd = req->rsk_rcv_wnd;
@@ -622,8 +619,12 @@ struct sock *tcp_create_openreq_child(const struct sock *sk,
 		newtp->fastopen_req = NULL;
 		newtp->fastopen_rsk = NULL;
 		newtp->syn_data_acked = 0;
-		newtp->rack.mstamp.v64 = 0;
+		newtp->rack.mstamp = 0;
 		newtp->rack.advanced = 0;
+		newtp->rack.reo_wnd_steps = 1;
+		newtp->rack.last_delivered = 0;
+		newtp->rack.reo_wnd_persist = 0;
+		newtp->rack.dsack_seen = 0;
 
 		TCP_INC_STATS_BH(sock_net(sk), TCP_MIB_PASSIVEOPENS);
 	}
@@ -800,7 +801,10 @@ struct sock *tcp_check_req(struct sock *sk, struct sk_buff *skb,
 	if (paws_reject || !tcp_in_window(TCP_SKB_CB(skb)->seq, TCP_SKB_CB(skb)->end_seq,
 					  tcp_rsk(req)->rcv_nxt, tcp_rsk(req)->rcv_nxt + req->rsk_rcv_wnd)) {
 		/* Out of window: send ACK and drop. */
-		if (!(flg & TCP_FLAG_RST))
+		if (!(flg & TCP_FLAG_RST) &&
+		    !tcp_oow_rate_limited(sock_net(sk), skb,
+					  LINUX_MIB_TCPACKSKIPPEDSYNRECV,
+					  &tcp_rsk(req)->last_oow_ack_time))
 			req->rsk_ops->send_ack(sk, skb, req);
 		if (paws_reject)
 			NET_INC_STATS_BH(sock_net(sk), LINUX_MIB_PAWSESTABREJECTED);
@@ -924,7 +928,7 @@ int tcp_child_process(struct sock *parent, struct sock *child,
 	struct sock *meta_sk = mptcp(tcp_sk(child)) ? mptcp_meta_sk(child) : child;
 #endif
 
-	tcp_sk(child)->segs_in += max_t(u16, 1, skb_shinfo(skb)->gso_segs);
+	tcp_segs_in(tcp_sk(child), skb);
 #ifdef CONFIG_MPTCP
 	if (!sock_owned_by_user(meta_sk)) {
 #else

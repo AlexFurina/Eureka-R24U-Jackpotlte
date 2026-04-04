@@ -30,7 +30,6 @@ static int min_rcvbuf = SOCK_MIN_RCVBUF;
 static int max_skb_frags = MAX_SKB_FRAGS;
 static long long_one __maybe_unused = 1;
 static long long_max __maybe_unused = LONG_MAX;
-static int useless = 0;
 
 static int net_msg_warn;	/* Unused, but still a sysctl */
 
@@ -366,18 +365,11 @@ static struct ctl_table net_core_table[] = {
 		.data		= &bpf_jit_kallsyms,
 		.maxlen		= sizeof(int),
 		.mode		= 0600,
-		.proc_handler	= proc_dointvec,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= &zero,
+		.extra2		= &two,
 	},
-#endif
-	{
-		.procname	= "bpf_jit_kallsyms",
-		.data		= &useless,
-		.maxlen         = sizeof(int),
-		.mode           = 0600,
-		.proc_handler   = proc_dointvec_minmax,
-		.extra1         = &zero,
-		.extra2         = &two,
-	},
+# endif
 	{
 		.procname	= "bpf_jit_limit",
 		.data		= &bpf_jit_limit,

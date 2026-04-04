@@ -622,7 +622,8 @@ static int gfs2_create_inode(struct inode *dir, struct dentry *dentry,
 	if (!IS_ERR(inode)) {
 		if (S_ISDIR(inode->i_mode)) {
 			iput(inode);
-			inode = ERR_PTR(-EISDIR);
+			inode = NULL;
+			error = -EISDIR;
 			goto fail_gunlock;
 		}
 		d_instantiate(dentry, inode);
@@ -1233,7 +1234,7 @@ static int gfs2_atomic_open(struct inode *dir, struct dentry *dentry,
 	struct dentry *d;
 	bool excl = !!(flags & O_EXCL);
 
-	if (!d_unhashed(dentry))
+	if (!d_in_lookup(dentry))
 		goto skip_lookup;
 
 	d = __gfs2_lookup(dir, dentry, file, opened);

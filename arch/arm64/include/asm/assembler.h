@@ -367,7 +367,11 @@ alternative_endif
 	.ifc	\op, cvac
 	__dcache_op_workaround_clean_cache \op, \kaddr
 	.else
+	.ifc	\op, cvap
+	sys	3, c7, c12, 1, \kaddr	// dc cvap
+	.else
 	dc	\op, \kaddr
+	.endif
 	.endif
 	.endif
 	add	\kaddr, \kaddr, \tmp1

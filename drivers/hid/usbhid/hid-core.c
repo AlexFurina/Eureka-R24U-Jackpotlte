@@ -94,10 +94,6 @@ static int hid_start_in(struct hid_device *hid)
 		} else {
 			clear_bit(HID_NO_BANDWIDTH, &usbhid->iofl);
 		}
-#ifdef CONFIG_USB_DEBUG_DETAILED_LOG
-		usbhid->in_err_isr = 0;
-		hid_info(hid, "%s submit urb rc=%d\n", __func__, rc);
-#endif
 	}
 	spin_unlock_irqrestore(&usbhid->lock, flags);
 	return rc;
@@ -283,25 +279,9 @@ static void hid_irq_in(struct urb *urb)
 		if ((hid->quirks & HID_QUIRK_ALWAYS_POLL) && !hid->open)
 			break;
 		if (!test_bit(HID_RESUME_RUNNING, &usbhid->iofl)) {
-		status = hid_input_report(urb->context, HID_INPUT_REPORT,
+			hid_input_report(urb->context, HID_INPUT_REPORT,
 					 urb->transfer_buffer,
 					 urb->actual_length, 1);
-#ifdef CONFIG_USB_DEBUG_DETAILED_LOG
-		if (status == 0) {
-			if (usbhid->in_err_isr) {
-				usbhid->in_err_isr = 0;
-				hid_info(urb->dev,
-				"usbhid: %s: recover report\n", __func__);
-			}
-		} else {
-			usbhid->in_err_isr++;
-			if (usbhid->in_err_isr < 5)
-				hid_err(urb->dev,
-				"usbhid: %s: err=%d err_isr=%lu length=%d\n",
-				__func__, status, usbhid->in_err_isr
-					,urb->actual_length);
-		}
-#endif
 			/*
 			 * autosuspend refused while keys are pressed
 			 * because most keyboards don't wake up when
@@ -314,9 +294,6 @@ static void hid_irq_in(struct urb *urb)
 		}
 		break;
 	case -EPIPE:		/* stall */
-#ifdef CONFIG_USB_DEBUG_DETAILED_LOG
-		hid_err(urb->dev, "usbhid: %s: stall\n", __func__);
-#endif
 		usbhid_mark_busy(usbhid);
 		clear_bit(HID_IN_RUNNING, &usbhid->iofl);
 		set_bit(HID_CLEAR_HALT, &usbhid->iofl);
@@ -325,20 +302,12 @@ static void hid_irq_in(struct urb *urb)
 	case -ECONNRESET:	/* unlink */
 	case -ENOENT:
 	case -ESHUTDOWN:	/* unplug */
-#ifdef CONFIG_USB_DEBUG_DETAILED_LOG
-		hid_err(urb->dev, "usbhid: %s: unlink %d\n",
-					__func__, urb->status);
-#endif
 		clear_bit(HID_IN_RUNNING, &usbhid->iofl);
 		return;
 	case -EILSEQ:		/* protocol error or unplug */
 	case -EPROTO:		/* protocol error or unplug */
 	case -ETIME:		/* protocol error or unplug */
 	case -ETIMEDOUT:	/* Should never happen, but... */
-#ifdef CONFIG_USB_DEBUG_DETAILED_LOG
-		hid_err(urb->dev, "usbhid: %s: protocol error %d\n",
-					__func__, urb->status);
-#endif
 		usbhid_mark_busy(usbhid);
 		clear_bit(HID_IN_RUNNING, &usbhid->iofl);
 		hid_io_error(hid);
@@ -710,9 +679,6 @@ int usbhid_open(struct hid_device *hid)
 	struct usbhid_device *usbhid = hid->driver_data;
 	int res = 0;
 
-#ifdef CONFIG_USB_DEBUG_DETAILED_LOG
-	hid_info(hid, "%s hid->open %d\n", __func__, hid->open);
-#endif
 	mutex_lock(&hid_open_mut);
 	if (!hid->open++) {
 		res = usb_autopm_get_interface(usbhid->intf);
@@ -750,10 +716,6 @@ int usbhid_open(struct hid_device *hid)
 	}
 done:
 	mutex_unlock(&hid_open_mut);
-#ifdef CONFIG_USB_DEBUG_DETAILED_LOG
-	if (res < 0)
-		hid_err(hid, "%s error res %d\n", __func__, res);
-#endif
 	return res;
 }
 
@@ -1005,12 +967,11 @@ static int usbhid_parse(struct hid_device *hid)
 	struct usb_host_interface *interface = intf->cur_altsetting;
 	struct usb_device *dev = interface_to_usbdev (intf);
 	struct hid_descriptor *hdesc;
+	struct hid_class_descriptor *hcdesc;
 	u32 quirks = 0;
 	unsigned int rsize = 0;
 	char *rdesc;
-	int ret, n;
-	int num_descriptors;
-	size_t offset = offsetof(struct hid_descriptor, desc);
+	int ret;
 
 	quirks = usbhid_lookup_quirk(le16_to_cpu(dev->descriptor.idVendor),
 			le16_to_cpu(dev->descriptor.idProduct));
@@ -1033,19 +994,19 @@ static int usbhid_parse(struct hid_device *hid)
 		return -ENODEV;
 	}
 
-	if (hdesc->bLength < sizeof(struct hid_descriptor)) {
-		dbg_hid("hid descriptor is too short\n");
+	if (!hdesc->bNumDescriptors ||
+	    hdesc->bLength != sizeof(*hdesc) +
+			      (hdesc->bNumDescriptors - 1) * sizeof(*hcdesc)) {
+		dbg_hid("hid descriptor invalid, bLen=%hhu bNum=%hhu\n",
+			hdesc->bLength, hdesc->bNumDescriptors);
 		return -EINVAL;
 	}
+
 	hid->version = le16_to_cpu(hdesc->bcdHID);
 	hid->country = hdesc->bCountryCode;
 
-	num_descriptors = min_t(int, hdesc->bNumDescriptors,
-	       (hdesc->bLength - offset) / sizeof(struct hid_class_descriptor));
-
-	for (n = 0; n < num_descriptors; n++)
-		if (hdesc->desc[n].bDescriptorType == HID_DT_REPORT)
-			rsize = le16_to_cpu(hdesc->desc[n].wDescriptorLength);
+	if (hdesc->rpt_desc.bDescriptorType == HID_DT_REPORT)
+		rsize = le16_to_cpu(hdesc->rpt_desc.wDescriptorLength);
 
 	if (!rsize || rsize > HID_MAX_DESCRIPTOR_SIZE) {
 		dbg_hid("weird size of report descriptor (%u)\n", rsize);
@@ -1073,6 +1034,11 @@ static int usbhid_parse(struct hid_device *hid)
 		dbg_hid("parsing report descriptor failed\n");
 		goto err;
 	}
+
+	if (hdesc->bNumDescriptors > 1)
+		hid_warn(intf,
+			"%u unsupported optional hid class descriptors\n",
+			(int)(hdesc->bNumDescriptors - 1));
 
 	hid->quirks |= quirks;
 
@@ -1371,7 +1337,7 @@ static int usbhid_probe(struct usb_interface *intf, const struct usb_device_id *
 		hid->type = HID_TYPE_USBNONE;
 
 	if (dev->manufacturer)
-		strlcpy(hid->name, dev->manufacturer, sizeof(hid->name));
+		strscpy(hid->name, dev->manufacturer, sizeof(hid->name));
 
 	if (dev->product) {
 		if (dev->manufacturer)
@@ -1416,9 +1382,6 @@ static int usbhid_probe(struct usb_interface *intf, const struct usb_device_id *
 			hid_err(intf, "can't add hid device: %d\n", ret);
 		goto err_free;
 	}
-
-	/* L2 is not supported */
-	/* usb_enable_autosuspend(dev); */
 
 	return 0;
 err_free:

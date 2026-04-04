@@ -21,27 +21,10 @@ fw-external-y := $(subst $(quote),,$(CONFIG_EXTRA_FIRMWARE))
 # But be aware that the config file might not be included at all.
 
 fw-shipped-$(CONFIG_EXYNOS7885_ACPM) += exynos7885_acpm_fvp.fw
-fw-shipped-$(CONFIG_TOUCHSCREEN_MELFAS_MSS100) += tsp_melfas/mss100_m30_00.fw tsp_melfas/mss100_m30.fw tsp_melfas/mss100_m30_old.fw tsp_melfas/mss100_a30.fw tsp_melfas/mss100_a30_old.fw tsp_melfas/mss100_a30_jpn.fw
-fw-shipped-$(CONFIG_TOUCHSCREEN_SEC_INCELL_TS) += tsp_sec/s6d7at01a01_j7topelte.fw tsp_sec/s6d7at0b01_a10.fw tsp_sec/s6d7at0b01_a10_boe.fw
 fw-shipped-$(CONFIG_TOUCHSCREEN_SEC_TS) += tsp_sec/y661_a5y18.fw tsp_sec/y661_a7y18.fw
-fw-shipped-$(CONFIG_TOUCHSCREEN_IST3038H) += tsp_imagis/ist3038h_a40.fw tsp_imagis/ist3038h_a40_cmcs.bin
-fw-shipped-$(CONFIG_TOUCHSCREEN_IST4050) += tsp_imagis/ist40xx_a30s.bin tsp_imagis/ist40xx_a30s_cmcs.bin
-fw-shipped-$(CONFIG_TOUCHSCREEN_HIMAX_INCELL) += tsp_himax/hx83112a_m20lte.fw tsp_himax/hx83102d_a20e.fw
-fw-shipped-$(CONFIG_TOUCHSCREEN_ZINITIX_ZT75XX_TCLM) += tsp_zinitix/zt7548_a6.fw tsp_zinitix/zt7548_feel2.fw tsp_zinitix/zt7548_a40.fw tsp_zinitix/zt7548_a20.fw tsp_zinitix/zt7548_a40s.fw tsp_zinitix/zt7548_m10s.fw
+fw-shipped-$(CONFIG_TOUCHSCREEN_ZINITIX_ZT75XX_TCLM) += tsp_zinitix/zt7548_feel2.fw
 
-fw-shipped-$(CONFIG_SENSORS_TC3XXK_A40) += coreriver/tc305k_a40_grip.fw
-fw-shipped-$(CONFIG_SENSORS_TC3XXK_A30) += coreriver/tc305k_a30_grip.fw
-fw-shipped-$(CONFIG_SENSORS_TC3XXK_A30_JPN) += coreriver/tc305k_a30_jpn_grip.fw
-fw-shipped-$(CONFIG_SENSORS_TC3XXK_A20) += coreriver/tc305k_a20_grip.fw
-fw-shipped-$(CONFIG_SENSORS_TC3XXK_A20E) += coreriver/tc305k_a20e_grip.fw
-fw-shipped-$(CONFIG_SENSORS_TC3XXK_A10) += coreriver/tc305k_a10_grip.fw coreriver/tc305k_a10_eur_kor.fw
-fw-shipped-$(CONFIG_SENSORS_TC3XXK_A10E) += coreriver/tc305k_a10e_grip.fw
-fw-shipped-$(CONFIG_SENSORS_TC3XXK_A10E_KOR) += coreriver/tc305k_a10e_kor.fw
-fw-shipped-$(CONFIG_SENSORS_A96T3X6_A40) += abov/a96t346_a405f.fw abov/a96t346_a405s.fw
-fw-shipped-$(CONFIG_SENSORS_A96T3X6_A30) += abov/a96t346_a305j.fw
-fw-shipped-$(CONFIG_SENSORS_A96T3X6_A30S) += abov/a96t356_a30s.fw
-
-fw-shipped-$(CONFIG_FIVE_TEE_DRIVER) += five/ffffffff000000000000000000000072.tlbin
+fw-shipped-$(CONFIG_SENSORS_A96T3X6) += abov/a96t326_jackpotvelte.fw
 
 fw-shipped-all := $(fw-shipped-y) $(fw-shipped-m) $(fw-shipped-)
 

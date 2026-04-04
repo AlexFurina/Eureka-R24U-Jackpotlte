@@ -421,7 +421,7 @@ KERNELVERSION = $(VERSION)$(if $(PATCHLEVEL),.$(PATCHLEVEL)$(if $(SUBLEVEL),.$(S
 
 export VERSION PATCHLEVEL SUBLEVEL KERNELRELEASE KERNELVERSION
 export ARCH SRCARCH CONFIG_SHELL HOSTCC HOSTCFLAGS CROSS_COMPILE LD CC
-export CPP AR NM STRIP OBJCOPY OBJDUMP READELF
+export CPP AR NM STRIP OBJCOPY OBJDUMP PAHOLE READELF
 export MAKE AWK GENKSYMS INSTALLKERNEL PERL PYTHON UTS_MACHINE
 export HOSTCXX HOSTCXXFLAGS LDFLAGS_MODULE CHECK CHECKFLAGS
 
@@ -674,6 +674,7 @@ ifneq ($(LLVM_IAS),1)
 KBUILD_CFLAGS += $(call cc-option, -no-integrated-as)
 KBUILD_AFLAGS += $(call cc-option, -no-integrated-as)
 endif
+PAHOLE		= pahole
 ifeq ($(ld-name),lld)
 KBUILD_CFLAGS += -fuse-ld=lld
 endif
@@ -796,11 +797,6 @@ ifdef CONFIG_KCOV
     CFLAGS_KCOV =
   endif
 endif
-
-# Eureka Kernel Versioning
-REV := $(shell grep -Po 'Eureka R\K[^*]+' ../kernel_zip/anykernel/version)
-EUREKA_VERSION := $(call cc-option, -DKERNEL_VERSION=$(REV))
-export EUREKA_VERSION
 
 ifeq ($(cc-name),clang)
 KBUILD_CFLAGS += $(call cc-disable-warning, format-invalid-specifier)

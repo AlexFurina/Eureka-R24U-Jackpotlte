@@ -1689,11 +1689,10 @@ void vm_unmap_ram(const void *mem, unsigned int count)
 	BUG_ON(addr > VMALLOC_END);
 	BUG_ON(addr & (PAGE_SIZE-1));
 
-	if (likely(count <= VMAP_MAX_ALLOC)) {
-		debug_check_no_locks_freed(mem, size);
-		vb_free(mem, size);
-		return;
-	}
+	if (likely(count <= VMAP_MAX_ALLOC))
+    vb_free(mem, size);
+
+return;
 
 	free_unmap_vmap_area_addr(addr);
 	debug_check_no_locks_freed((void *)va->va_start,
@@ -2575,6 +2574,26 @@ void *vzalloc_node(unsigned long size, int node)
 			 GFP_KERNEL | __GFP_ZERO);
 }
 EXPORT_SYMBOL(vzalloc_node);
+
+/**
+ * vmalloc_user_node_flags - allocate memory for userspace on a specific node
+ * @size: allocation size
+ * @node: numa node
+ * @flags: flags for the page level allocator
+ *
+ * The resulting memory area is zeroed so it can be mapped to userspace
+ * without leaking data.
+ *
+ * Return: pointer to the allocated memory or %NULL on error
+ */
+void *vmalloc_user_node_flags(unsigned long size, int node, gfp_t flags)
+{
+	return __vmalloc_node_range(size, SHMLBA,  VMALLOC_START, VMALLOC_END,
+				    flags | __GFP_ZERO, PAGE_KERNEL,
+				    VM_USERMAP, node,
+				    __builtin_return_address(0));
+}
+EXPORT_SYMBOL(vmalloc_user_node_flags);
 
 /**
  *	vmalloc_exec  -  allocate virtually contiguous, executable memory

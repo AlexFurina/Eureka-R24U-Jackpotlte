@@ -14,16 +14,9 @@
 #include <linux/mount.h>
 #include <linux/file.h>
 #include <linux/random.h>
-#include <linux/quotaops.h>
-#include <linux/random.h>
-#include <linux/uuid.h>
 #include <asm/uaccess.h>
 #include "ext4_jbd2.h"
 #include "ext4.h"
-
-#ifdef CONFIG_EXT4CRYPT_SDP
-#include "sdp/fscrypto_sdp_ioctl.h"
-#endif
 
 #define MAX_32_NUM ((((unsigned long long) 1) << 32) - 1)
 
@@ -104,6 +97,7 @@ static long swap_inode_boot_loader(struct super_block *sb,
 	int err;
 	struct inode *inode_bl;
 	struct ext4_inode_info *ei_bl;
+	struct ext4_sb_info *sbi = EXT4_SB(sb);
 
 	if (inode->i_nlink != 1 || !S_ISREG(inode->i_mode))
 		return -EINVAL;
@@ -141,7 +135,7 @@ static long swap_inode_boot_loader(struct super_block *sb,
 	/* Protect extent tree against block allocations via delalloc */
 	ext4_double_down_write_data_sem(inode, inode_bl);
 
-	if (is_bad_inode(inode_bl) || !S_ISREG(inode_bl->i_mode)) {
+	if (inode_bl->i_nlink == 0) {
 		/* this inode has never been used as a BOOT_LOADER */
 		set_nlink(inode_bl, 1);
 		i_uid_write(inode_bl, 0);
@@ -150,7 +144,6 @@ static long swap_inode_boot_loader(struct super_block *sb,
 		ei_bl->i_flags = 0;
 		inode_bl->i_version = 1;
 		i_size_write(inode_bl, 0);
-		EXT4_I(inode_bl)->i_disksize = inode_bl->i_size;
 		inode_bl->i_mode = S_IFREG;
 		if (ext4_has_feature_extents(sb)) {
 			ext4_set_inode_flag(inode_bl, EXT4_INODE_EXTENTS);
@@ -163,8 +156,10 @@ static long swap_inode_boot_loader(struct super_block *sb,
 
 	inode->i_ctime = inode_bl->i_ctime = ext4_current_time(inode);
 
-	inode->i_generation = prandom_u32();
-	inode_bl->i_generation = prandom_u32();
+	spin_lock(&sbi->s_next_gen_lock);
+	inode->i_generation = sbi->s_next_generation++;
+	inode_bl->i_generation = sbi->s_next_generation++;
+	spin_unlock(&sbi->s_next_gen_lock);
 
 	ext4_discard_preallocations(inode);
 
@@ -717,15 +712,6 @@ encryption_policy_out:
 		return -EOPNOTSUPP;
 #endif
 	}
-#ifdef CONFIG_EXT4CRYPT_SDP
-	case EXT4_IOC_GET_SDP_INFO:
-	case EXT4_IOC_SET_SDP_POLICY:
-	case EXT4_IOC_SET_SENSITIVE:
-	case EXT4_IOC_SET_PROTECTED:
-	case EXT4_IOC_ADD_CHAMBER:
-	case EXT4_IOC_REMOVE_CHAMBER:
-		return fscrypt_sdp_ioctl(filp, cmd, arg);
-#endif
 	default:
 		return -ENOTTY;
 	}
@@ -792,14 +778,6 @@ long ext4_compat_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	case EXT4_IOC_SET_ENCRYPTION_POLICY:
 	case EXT4_IOC_GET_ENCRYPTION_PWSALT:
 	case EXT4_IOC_GET_ENCRYPTION_POLICY:
-#ifdef CONFIG_EXT4CRYPT_SDP
-	case EXT4_IOC_GET_SDP_INFO:
-	case EXT4_IOC_SET_SDP_POLICY:
-	case EXT4_IOC_SET_SENSITIVE:
-	case EXT4_IOC_SET_PROTECTED:
-	case EXT4_IOC_ADD_CHAMBER:
-	case EXT4_IOC_REMOVE_CHAMBER:
-#endif
 		break;
 	default:
 		return -ENOIOCTLCMD;

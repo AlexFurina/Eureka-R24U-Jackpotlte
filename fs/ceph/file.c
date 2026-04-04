@@ -349,7 +349,7 @@ int ceph_atomic_open(struct inode *dir, struct dentry *dentry,
 	if ((flags & O_CREAT) && !req->r_reply_info.head->is_dentry)
 		err = ceph_handle_notrace_create(dir, dentry);
 
-	if (d_unhashed(dentry)) {
+	if (d_in_lookup(dentry)) {
 		dn = ceph_finish_lookup(req, dentry, err);
 		if (IS_ERR(dn))
 			err = PTR_ERR(dn);
@@ -1303,7 +1303,7 @@ static int ceph_zero_objects(struct inode *inode, loff_t offset, loff_t length)
 	s32 stripe_unit = ceph_file_layout_su(ci->i_layout);
 	s32 stripe_count = ceph_file_layout_stripe_count(ci->i_layout);
 	s32 object_size = ceph_file_layout_object_size(ci->i_layout);
-	u64 object_set_size = object_size * stripe_count;
+	u64 object_set_size = (u64) object_size * stripe_count;
 	u64 nearly, t;
 
 	/* round offset up to next period boundary */

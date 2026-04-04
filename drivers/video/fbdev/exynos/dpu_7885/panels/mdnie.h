@@ -145,7 +145,7 @@ struct mdnie_tune {
 	struct rgb_info		*wrgb_swa;
 	unsigned char **coordinate_table;
 	unsigned char **adjust_ldu_table;
-	unsigned char *night_mode_table;
+        unsigned char **night_mode_table;
 	unsigned char *color_lens_table;
 	int (*get_hbm_index)(int);
 	int (*color_offset[])(int, int);
